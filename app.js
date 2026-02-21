@@ -506,46 +506,282 @@ function ensureAbsentScrollBox(){
 
 // === إضافات: واجهة النسخ الاحتياطي (تصدير/استيراد) للمعلمين والفصول ===
 (function addImportExportUI(){
-  const sec = document.getElementById('teachers');
-  if(!sec) return;
-  const card = document.createElement('div'); card.className = 'card backup-card align-center';
-  const title = document.createElement('h3'); title.className='card-title'; title.textContent='النسخ الاحتياطي للجداول'; card.appendChild(title);
-  const actions = document.createElement('div'); actions.className='actions compact';
-  const exportBtn = document.createElement('button'); exportBtn.id='exportTeachersBtn'; exportBtn.className='btn primary'; exportBtn.textContent='تصدير بيانات المعلمين';
-  const importBtn = document.createElement('button'); importBtn.id='importTeachersBtn'; importBtn.className='btn secondary'; importBtn.textContent='استيراد بيانات المعلمين';
-  const fileInp=document.createElement('input'); fileInp.type='file'; fileInp.id='importTeachersInput'; fileInp.accept='.json'; fileInp.style.display='none';
-  actions.appendChild(exportBtn); actions.appendChild(importBtn);
-  card.appendChild(actions); card.appendChild(fileInp);
-  sec.appendChild(card);
+ const sec = document.getElementById('teachers');
+ if(!sec) return;
+ const card = document.createElement('div'); card.className = 'card backup-card align-center';
+ const title = document.createElement('h3'); title.className='card-title'; title.textContent='النسخ الاحتياطي للجداول'; card.appendChild(title);
 
-  function exportTeachersData(){
-    const payload = { version: 'v3.3', exportedAt: new Date().toISOString(), teachers, classes };
-    const data = JSON.stringify(payload, null, 2);
-    const blob = new Blob([data], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='backup_teachers_classes.json'; a.click(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    showToast('تم تصدير البيانات بنجاح ✔');
-  }
+ const actions = document.createElement('div'); actions.className='actions compact';
 
-  function importTeachersData(file){
-    const reader = new FileReader();
-    reader.onload = (evt)=>{
-      try{
-        const obj = JSON.parse(evt.target.result);
-        const importedTeachers = Array.isArray(obj) ? obj : obj.teachers;
-        const importedClasses = Array.isArray(obj) ? [] : (obj.classes || []);
-        if(!Array.isArray(importedTeachers)) throw new Error('invalid');
-        if(!confirm('سيتم استبدال بيانات المعلمين الحالية. هل تريد المتابعة؟')) return;
-        teachers = importedTeachers; classes = importedClasses.length ? importedClasses : classes;
-        LS.set('teachers', teachers); LS.set('classes', classes);
-        refreshTeachersSelect(); refreshTeachersTable(); renderScheduleGrid(settings.days[0]);
-        showToast('تم الاستيراد بنجاح ✔');
-      }catch(e){ alert('ملف غير صالح!'); }
-    };
-    reader.readAsText(file);
-  }
+ // JSON
+ const exportBtn = document.createElement('button'); exportBtn.id='exportTeachersBtn'; exportBtn.className='btn primary'; exportBtn.textContent='تصدير بيانات المعلمين (JSON)';
+ const importBtn = document.createElement('button'); importBtn.id='importTeachersBtn'; importBtn.className='btn secondary'; importBtn.textContent='استيراد بيانات المعلمين (JSON)';
+ const fileInp = document.createElement('input');
+ fileInp.type='file';
+ fileInp.id='importTeachersInput';
+ fileInp.accept='.json';
+ fileInp.style.display='none';
 
-  exportBtn.addEventListener('click', exportTeachersData);
-  importBtn.addEventListener('click', ()=>fileInp.click());
-  fileInp.addEventListener('change', (e)=>{ const file = e.target.files[0]; if(file) importTeachersData(file); e.target.value=''; });
+ // Excel عبر CSV (بفاصل ; ليظهر في أعمدة داخل Excel العربي)
+ const exportExcelBtn = document.createElement('button'); exportExcelBtn.id='exportTeachersExcelBtn'; exportExcelBtn.className='btn primary'; exportExcelBtn.textContent='تصدير Excel (CSV)';
+ const importExcelBtn = document.createElement('button'); importExcelBtn.id='importTeachersExcelBtn'; importExcelBtn.className='btn secondary'; importExcelBtn.textContent='استيراد Excel (CSV)';
+ const templateExcelBtn = document.createElement('button'); templateExcelBtn.id='templateTeachersExcelBtn'; templateExcelBtn.className='btn secondary'; templateExcelBtn.textContent='تحميل قالب Excel (CSV)';
+
+ const excelInp = document.createElement('input');
+ excelInp.type='file';
+ excelInp.id='importTeachersExcelInput';
+ excelInp.accept='.csv,text/csv,application/vnd.ms-excel';
+ excelInp.style.display='none';
+
+ actions.appendChild(exportBtn);
+ actions.appendChild(importBtn);
+ actions.appendChild(exportExcelBtn);
+ actions.appendChild(importExcelBtn);
+ actions.appendChild(templateExcelBtn);
+
+ card.appendChild(actions);
+ card.appendChild(fileInp);
+ card.appendChild(excelInp);
+
+ const info = document.createElement('div');
+ info.className = 'muted small right';
+ info.style.marginTop = '10px';
+ info.innerHTML = "<b>حقول ملف Excel (CSV) للاستيراد:</b> اسم_المعلم؛ ملاحظات_المعلم (اختياري)؛ اليوم؛ رقم_الحصة؛ اسم_الفصل؛ المرحلة (اختياري).<br><span class='small'>ملاحظة: ملف CSV يتم تصديره بفاصل <b>;</b> ليظهر كل حقل في عمود مستقل داخل Excel.</span>";
+ card.appendChild(info);
+
+ sec.appendChild(card);
+
+ // ===== أدوات مساعدة للتنزيل =====
+ function downloadTextFile(filename, content, mime){
+   const blob = new Blob([content], {type: mime || 'text/plain;charset=utf-8;'});
+   const url = URL.createObjectURL(blob);
+   const a = document.createElement('a');
+   a.href = url;
+   a.download = filename;
+   a.click();
+   setTimeout(()=>URL.revokeObjectURL(url), 1000);
+ }
+
+ // ===== JSON Export/Import (كما كان) =====
+ function exportTeachersData(){
+   const payload = { version: 'v3.3', exportedAt: new Date().toISOString(), teachers, classes };
+   const data = JSON.stringify(payload, null, 2);
+   const blob = new Blob([data], {type:'application/json'});
+   const url = URL.createObjectURL(blob);
+   const a=document.createElement('a'); a.href=url; a.download='backup_teachers_classes.json'; a.click();
+   setTimeout(()=>URL.revokeObjectURL(url), 1000);
+   showToast('تم تصدير البيانات بنجاح ✔');
+ }
+
+ function importTeachersData(file){
+   const reader = new FileReader();
+   reader.onload = (evt)=>{
+     try{
+       const obj = JSON.parse(evt.target.result);
+       const importedTeachers = Array.isArray(obj) ? obj : obj.teachers;
+       const importedClasses  = Array.isArray(obj) ? [] : (obj.classes || []);
+       if(!Array.isArray(importedTeachers)) throw new Error('invalid');
+       if(!confirm('سيتم استبدال بيانات المعلمين الحالية. هل تريد المتابعة؟')) return;
+       teachers = importedTeachers;
+       classes = importedClasses.length ? importedClasses : classes;
+       LS.set('teachers', teachers);
+       LS.set('classes', classes);
+       refreshTeachersSelect();
+       refreshTeachersTable();
+       renderScheduleGrid(settings.days[0]);
+       showToast('تم الاستيراد بنجاح ✔');
+     }catch(e){
+       alert('ملف غير صالح!');
+     }
+   };
+   reader.readAsText(file);
+ }
+
+ // ===== Excel CSV Export/Import =====
+ const CSV_DELIM = ';';
+
+ function csvEscape(v){
+   const s = (v ?? '').toString();
+   if (/[\n\r";]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+   return s;
+ }
+
+ function exportTeachersExcelCSV(){
+   const headers = ['اسم_المعلم','ملاحظات_المعلم','اليوم','رقم_الحصة','اسم_الفصل','المرحلة'];
+   const rows = [headers];
+   const dayList = settings.days || [];
+
+   teachers.forEach(t => {
+     let hasAny = false;
+     dayList.forEach(day => {
+       for(let p=1; p<=settings.periods; p++){
+         const cid = t?.schedule?.[day]?.[p] ?? null;
+         if(!cid) continue;
+         hasAny = true;
+         const cls = classes.find(c => c.id === cid);
+         rows.push([t.name, t.note || '', day, p, cls?.name || '', cls?.grade || '']);
+       }
+     });
+     if(!hasAny){
+       rows.push([t.name, t.note || '', '', '', '', '']);
+     }
+   });
+
+   const csv = '\ufeff' + rows.map(r => r.map(csvEscape).join(CSV_DELIM)).join('\n');
+   const stamp = new Date().toISOString().slice(0,10);
+   downloadTextFile(`backup_teachers_${stamp}.csv`, csv, 'text/csv;charset=utf-8;');
+   showToast('تم تصدير ملف Excel (CSV) ✔');
+ }
+
+ function downloadTeachersTemplateCSV(){
+   const headers = ['اسم_المعلم','ملاحظات_المعلم','اليوم','رقم_الحصة','اسم_الفصل','المرحلة'];
+   // مثال واضح (يمكن للمستخدم مسحه واستبداله)
+   const sample = [
+     ['خالد سعيد المويسي','التربية الاسلامية','الأحد','1','11','الحادي عشر'],
+     ['خالد سعيد المويسي','التربية الاسلامية','الأحد','4','8','الثامن'],
+     ['مثال: معلم بدون جدول','ملاحظات اختيارية','','','','']
+   ];
+   const rows = [headers, ...sample];
+   const csv = '\ufeff' + rows.map(r => r.map(csvEscape).join(CSV_DELIM)).join('\n');
+   downloadTextFile('قالب_استيراد_المعلمين.csv', csv, 'text/csv;charset=utf-8;');
+   showToast('تم تحميل قالب Excel (CSV) ✔');
+ }
+
+ function detectDelimiter(line){
+   const c = (line.match(/,/g) || []).length;
+   const s = (line.match(/;/g) || []).length;
+   return s >= c ? ';' : ',';
+ }
+
+ function parseCSV(text){
+   const firstLine = (text.split(/\r?\n/).find(l => l.trim().length) || '');
+   const delim = detectDelimiter(firstLine);
+
+   const rows = [];
+   let row = [];
+   let cur = '';
+   let inQuotes = false;
+   for(let i=0;i<text.length;i++){
+     const ch = text[i];
+     const next = text[i+1];
+     if(inQuotes){
+       if(ch === '"' && next === '"'){ cur += '"'; i++; }
+       else if(ch === '"'){ inQuotes = false; }
+       else { cur += ch; }
+     } else {
+       if(ch === '"'){ inQuotes = true; }
+       else if(ch === delim){ row.push(cur); cur = ''; }
+       else if(ch === '\n'){
+         row.push(cur); rows.push(row); row = []; cur='';
+       } else if(ch === '\r'){
+         // ignore
+       } else { cur += ch; }
+     }
+   }
+   row.push(cur);
+   rows.push(row);
+   while(rows.length && rows[rows.length-1].every(c => (c ?? '').trim() === '')) rows.pop();
+   return rows;
+ }
+
+ function importTeachersExcelCSV(file){
+   const reader = new FileReader();
+   reader.onload = (evt)=>{
+     try{
+       const text = (evt.target.result || '').toString();
+       const rows = parseCSV(text);
+       if(rows.length < 1) throw new Error('empty');
+
+       const header = rows[0].map(h => (h||'').trim());
+       const alias = {
+         'اسم_المعلم':'teacher_name', 'teacher_name':'teacher_name',
+         'ملاحظات_المعلم':'teacher_note','teacher_note':'teacher_note',
+         'اليوم':'day','day':'day',
+         'رقم_الحصة':'period','period':'period',
+         'اسم_الفصل':'class_name','class_name':'class_name',
+         'المرحلة':'class_grade','class_grade':'class_grade'
+       };
+       const idx = {};
+       header.forEach((h,i)=>{ const key = alias[h] || alias[h.replace(/\s+/g,'_')] || null; if(key) idx[key]=i; });
+       if(idx.teacher_name == null) throw new Error('missing teacher_name');
+
+       if(!confirm('سيتم استبدال بيانات المعلمين الحالية. هل تريد المتابعة؟')) return;
+
+       const classByName = new Map();
+       const newClasses = [];
+       function getOrCreateClass(name, grade){
+         const nm = (name||'').trim();
+         if(!nm) return null;
+         if(classByName.has(nm)){
+           const c = classByName.get(nm);
+           if(grade && !c.grade) c.grade = grade;
+           return c;
+         }
+         const c = { id: uid(), name: nm, grade: (grade||'').trim() };
+         classByName.set(nm,c);
+         newClasses.push(c);
+         return c;
+       }
+
+       const teacherByName = new Map();
+       const newTeachers = [];
+       const validDays = new Set(settings.days || []);
+
+       for(let r=1; r<rows.length; r++){
+         const line = rows[r];
+         const tName = (line[idx.teacher_name] ?? '').trim();
+         if(!tName) continue;
+         let t = teacherByName.get(tName);
+         if(!t){
+           t = { id: uid(), name: tName, note: '', schedule: {} };
+           teacherByName.set(tName, t);
+           newTeachers.push(t);
+         }
+         const note = idx.teacher_note != null ? (line[idx.teacher_note] ?? '').trim() : '';
+         if(note && !t.note) t.note = note;
+
+         const day = idx.day != null ? (line[idx.day] ?? '').trim() : '';
+         const perStr = idx.period != null ? (line[idx.period] ?? '').trim() : '';
+         const clsName = idx.class_name != null ? (line[idx.class_name] ?? '').trim() : '';
+         const grade = idx.class_grade != null ? (line[idx.class_grade] ?? '').trim() : '';
+
+         if(!day || !perStr || !clsName) continue;
+         if(!validDays.has(day)) continue;
+         const p = Number(perStr);
+         if(!Number.isFinite(p) || p < 1 || p > settings.periods) continue;
+
+         const cls = getOrCreateClass(clsName, grade);
+         if(!cls) continue;
+         t.schedule[day] = t.schedule[day] || {};
+         t.schedule[day][p] = cls.id;
+       }
+
+       teachers = newTeachers;
+       classes = newClasses.length ? newClasses : classes;
+
+       LS.set('teachers', teachers);
+       LS.set('classes', classes);
+       refreshTeachersSelect();
+       refreshTeachersTable();
+       renderScheduleGrid(settings.days[0]);
+       showToast('تم استيراد Excel (CSV) بنجاح ✔');
+     }catch(e){
+       alert('ملف CSV غير صالح! تأكد من أسماء الحقول وترتيبها.');
+     }
+   };
+   reader.readAsText(file);
+ }
+
+ // Events
+ exportBtn.addEventListener('click', exportTeachersData);
+ importBtn.addEventListener('click', ()=>fileInp.click());
+ fileInp.addEventListener('change', (e)=>{ const file = e.target.files[0]; if(file) importTeachersData(file); e.target.value=''; });
+
+ exportExcelBtn.addEventListener('click', exportTeachersExcelCSV);
+ importExcelBtn.addEventListener('click', ()=>excelInp.click());
+ excelInp.addEventListener('change', (e)=>{ const file = e.target.files[0]; if(file) importTeachersExcelCSV(file); e.target.value=''; });
+
+ templateExcelBtn.addEventListener('click', downloadTeachersTemplateCSV);
 })();
+;
+;
